@@ -75,6 +75,7 @@ function findBestMatch(scannedEncoding) {
 async function startScanningLoop() {
     while (true) {
         if (!isRegistering) {
+            await new Promise(r => setTimeout(r, 100)); 
             const data = await processFrame();
             
             ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -92,7 +93,6 @@ async function startScanningLoop() {
                 ctx.fillText(matchName, left, top - 10);
             });
         }
-        await new Promise(r => setTimeout(r, 100)); 
     }
 }
 
