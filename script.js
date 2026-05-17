@@ -6,7 +6,7 @@ const clearBtn = document.getElementById('clearBtn');
 const usernameInput = document.getElementById('username');
 const statusMsg = document.getElementById('statusMsg');
 
-const BACKEND_URL = "https://yogeshxd-faceauth.hf.space"; 
+const BACKEND_URL = "https://yogeshxd-faceauth.hf.space/analyze_face"; 
 
 let localDatabase = JSON.parse(localStorage.getItem('secureFaceDb')) || [];
 let isRegistering = false;
