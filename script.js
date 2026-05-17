@@ -92,7 +92,7 @@ async function startScanningLoop() {
                 ctx.fillText(matchName, left, top - 10);
             });
         }
-        await new Promise(r => setTimeout(r, 300)); 
+        await new Promise(r => setTimeout(r, 100)); 
     }
 }
 
