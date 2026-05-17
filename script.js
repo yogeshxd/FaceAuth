@@ -25,12 +25,19 @@ navigator.mediaDevices.getUserMedia({ video: true })
     });
 
 async function processFrame() {
+    if (video.videoWidth === 0 || video.videoHeight === 0) {
+        return { faces: [] };
+    }
+
     const tempCanvas = document.createElement('canvas');
     tempCanvas.width = video.videoWidth;
     tempCanvas.height = video.videoHeight;
     tempCanvas.getContext('2d').drawImage(video, 0, 0);
     
     const blob = await new Promise(resolve => tempCanvas.toBlob(resolve, 'image/jpeg'));
+    if (!blob) {
+        return { faces: [] };
+    }
     
     const formData = new FormData();
     formData.append('file', blob, 'frame.jpg');
@@ -39,7 +46,6 @@ async function processFrame() {
         const response = await fetch(BACKEND_URL, { method: 'POST', body: formData });
         return await response.json();
     } catch (error) {
-        console.error(error);
         return { faces: [] };
     }
 }
