@@ -1,139 +1,122 @@
 const video = document.getElementById('video');
+const canvas = document.getElementById('overlay');
+const ctx = canvas.getContext('2d');
 const registerBtn = document.getElementById('registerBtn');
 const clearBtn = document.getElementById('clearBtn');
 const usernameInput = document.getElementById('username');
 const statusMsg = document.getElementById('statusMsg');
 
-let labeledFaceDescriptors = [];
-let faceMatcher = null;
+const BACKEND_URL = "https://YOUR_HUGGING_FACE_SPACE_URL/analyze_face"; 
 
-// 1. Load Models from the /models directory
-Promise.all([
-    faceapi.nets.ssdMobilenetv1.loadFromUri('/models'),
-    faceapi.nets.faceLandmark68Net.loadFromUri('/models'),
-    faceapi.nets.faceRecognitionNet.loadFromUri('/models')
-]).then(startSystem);
+let localDatabase = JSON.parse(localStorage.getItem('secureFaceDb')) || [];
+let isRegistering = false;
 
-function startSystem() {
-    statusMsg.innerText = "Starting Webcam...";
-    statusMsg.style.color = "blue";
-    loadDatabase();
-    startVideo();
-}
-
-// 2. Start Webcam
-function startVideo() {
-    navigator.mediaDevices.getUserMedia({ video: {} })
-        .then(stream => {
-            video.srcObject = stream;
-            registerBtn.disabled = false;
-            clearBtn.disabled = false;
-            statusMsg.innerText = "System Active";
-            statusMsg.style.color = "green";
-        })
-        .catch(err => {
-            console.error(err);
-            statusMsg.innerText = "Webcam access denied.";
-            statusMsg.style.color = "red";
-        });
-}
-
-// 3. Main Video Loop (Runs continuously to scan faces)
-video.addEventListener('play', () => {
-    const canvas = document.getElementById('overlay');
-    const displaySize = { width: video.width, height: video.height };
-    faceapi.matchDimensions(canvas, displaySize);
-
-    setInterval(async () => {
-        // Detect faces
-        const detections = await faceapi.detectAllFaces(video)
-            .withFaceLandmarks()
-            .withFaceDescriptors();
-            
-        const resizedDetections = faceapi.resizeResults(detections, displaySize);
-        canvas.getContext('2d').clearRect(0, 0, canvas.width, canvas.height);
-
-        // If we have registered users, try to recognize
-        if (faceMatcher && resizedDetections.length > 0) {
-            const results = resizedDetections.map(d => faceMatcher.findBestMatch(d.descriptor));
-            
-            results.forEach((result, i) => {
-                const box = resizedDetections[i].detection.box;
-                const text = result.toString();
-                const drawBox = new faceapi.draw.DrawBox(box, { 
-                    label: text, 
-                    boxColor: result.label === "unknown" ? 'red' : 'green' 
-                });
-                drawBox.draw(canvas);
-            });
-        } else {
-            // Just draw standard boxes if no one is registered yet
-            faceapi.draw.drawDetections(canvas, resizedDetections);
-        }
-    }, 100);
-});
-
-// 4. Register a New User
-registerBtn.addEventListener('click', async () => {
-    const label = usernameInput.value.trim();
-    if (!label) return alert("Please enter a name first.");
-
-    statusMsg.innerText = "Scanning face for registration...";
-    
-    // Get single face descriptor
-    const detection = await faceapi.detectSingleFace(video).withFaceLandmarks().withFaceDescriptor();
-    
-    if (!detection) {
-        statusMsg.innerText = "No face detected. Please face the camera.";
-        return;
-    }
-
-    // Save to runtime array
-    const newDescriptor = new faceapi.LabeledFaceDescriptors(label, [detection.descriptor]);
-    labeledFaceDescriptors.push(newDescriptor);
-    
-    // Re-initialize matcher with new data
-    faceMatcher = new faceapi.FaceMatcher(labeledFaceDescriptors, 0.6);
-    
-    saveDatabase();
-    
-    usernameInput.value = '';
-    statusMsg.innerText = `Successfully registered: ${label}`;
-    setTimeout(() => statusMsg.innerText = "System Active", 3000);
-});
-
-// 5. Database Logic (Using Local Storage)
-function saveDatabase() {
-    // face-api descriptors are Float32Arrays. JSON can't stringify them natively.
-    // We must convert them to standard arrays first.
-    const dataToStore = labeledFaceDescriptors.map(lfd => ({
-        label: lfd.label,
-        descriptors: lfd.descriptors.map(d => Array.from(d))
-    }));
-    localStorage.setItem('faceDatabase', JSON.stringify(dataToStore));
-}
-
-function loadDatabase() {
-    const storedData = localStorage.getItem('faceDatabase');
-    if (!storedData) return;
-
-    const parsedData = JSON.parse(storedData);
-    
-    // Convert standard arrays back to Float32Arrays for face-api
-    labeledFaceDescriptors = parsedData.map(data => {
-        const descriptors = data.descriptors.map(d => new Float32Array(d));
-        return new faceapi.LabeledFaceDescriptors(data.label, descriptors);
+navigator.mediaDevices.getUserMedia({ video: true })
+    .then(stream => {
+        video.srcObject = stream;
+        registerBtn.disabled = false;
+        statusMsg.innerText = "System Active";
+        statusMsg.style.color = "green";
+        startScanningLoop();
+    })
+    .catch(err => {
+        statusMsg.innerText = "Webcam access denied.";
+        statusMsg.style.color = "red";
     });
 
-    if (labeledFaceDescriptors.length > 0) {
-        faceMatcher = new faceapi.FaceMatcher(labeledFaceDescriptors, 0.6);
+async function processFrame() {
+    const tempCanvas = document.createElement('canvas');
+    tempCanvas.width = video.videoWidth;
+    tempCanvas.height = video.videoHeight;
+    tempCanvas.getContext('2d').drawImage(video, 0, 0);
+    
+    const blob = await new Promise(resolve => tempCanvas.toBlob(resolve, 'image/jpeg'));
+    
+    const formData = new FormData();
+    formData.append('file', blob, 'frame.jpg');
+
+    try {
+        const response = await fetch(BACKEND_URL, { method: 'POST', body: formData });
+        return await response.json();
+    } catch (error) {
+        console.error(error);
+        return { faces: [] };
     }
 }
 
+function calculateDistance(vec1, vec2) {
+    let sum = 0;
+    for (let i = 0; i < vec1.length; i++) {
+        sum += Math.pow(vec1[i] - vec2[i], 2);
+    }
+    return Math.sqrt(sum);
+}
+
+function findBestMatch(scannedEncoding) {
+    let bestMatch = "Unknown";
+    let lowestDistance = 0.6; 
+
+    localDatabase.forEach(user => {
+        const distance = calculateDistance(scannedEncoding, user.encoding);
+        if (distance < lowestDistance) {
+            lowestDistance = distance;
+            bestMatch = user.name;
+        }
+    });
+    return bestMatch;
+}
+
+async function startScanningLoop() {
+    while (true) {
+        if (!isRegistering) {
+            const data = await processFrame();
+            
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            
+            data.faces.forEach(face => {
+                const [top, right, bottom, left] = face.box;
+                const matchName = findBestMatch(face.encoding);
+                
+                ctx.strokeStyle = matchName === "Unknown" ? "red" : "green";
+                ctx.lineWidth = 3;
+                ctx.strokeRect(left, top, right - left, bottom - top);
+                
+                ctx.fillStyle = matchName === "Unknown" ? "red" : "green";
+                ctx.font = "20px Arial";
+                ctx.fillText(matchName, left, top - 10);
+            });
+        }
+        await new Promise(r => setTimeout(r, 300)); 
+    }
+}
+
+registerBtn.addEventListener('click', async () => {
+    const name = usernameInput.value.trim();
+    if (!name) return alert("Enter a name.");
+    
+    isRegistering = true;
+    statusMsg.innerText = "Extracting biometrics securely...";
+    
+    const data = await processFrame();
+    
+    if (data.faces.length === 0) {
+        alert("No face detected. Try again.");
+    } else if (data.faces.length > 1) {
+        alert("Multiple faces detected. Please stand alone.");
+    } else {
+        const newEncoding = data.faces[0].encoding;
+        localDatabase.push({ name: name, encoding: newEncoding });
+        localStorage.setItem('secureFaceDb', JSON.stringify(localDatabase));
+        
+        usernameInput.value = '';
+        statusMsg.innerText = `Registered: ${name}`;
+        setTimeout(() => statusMsg.innerText = "System Active", 2000);
+    }
+    isRegistering = false;
+});
+
 clearBtn.addEventListener('click', () => {
-    localStorage.removeItem('faceDatabase');
-    labeledFaceDescriptors = [];
-    faceMatcher = null;
-    statusMsg.innerText = "Database Cleared.";
-    setTimeout(() => statusMsg.innerText = "System Active", 3000);
+    localStorage.removeItem('secureFaceDb');
+    localDatabase = [];
+    alert("Local database cleared.");
 });
