@@ -1,15 +1,22 @@
-FROM anaconda/miniconda
+FROM python:3.9-slim
+
+RUN apt-get update && apt-get install -y \
+    cmake \
+    build-essential \
+    git \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-RUN conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main
-RUN conda tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r
-RUN conda install -c conda-forge dlib -y
-RUN apt-get update && apt-get install -y git
+ENV CMAKE_BUILD_PARALLEL_LEVEL=1
+
+RUN pip install --no-cache-dir setuptools wheel cmake
+RUN pip install --no-cache-dir dlib
+
+RUN pip install --no-cache-dir git+https://github.com/ageitgey/face_recognition_models
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-RUN pip install git+https://github.com/ageitgey/face_recognition_models
 
 COPY . .
 
