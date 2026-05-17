@@ -74,6 +74,7 @@ function findBestMatch(scannedEncoding) {
 
 async function startScanningLoop() {
     while (true) {
+        await new Promise(r => setTimeout(r, 10)); 
         if (!isRegistering) {
             const data = await processFrame();
             
